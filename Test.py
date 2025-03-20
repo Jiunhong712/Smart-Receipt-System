@@ -9,7 +9,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # Step 1: Load the fine-tuned model, tokenizer, and label encoder
-model_dir = r"C:\Users\xavie\OneDrive\Documents\Y4S1\FYP"
+model_dir = r"C:\Users\xavie\OneDrive\Documents\Y4S1\FYP\fine_tuned_bert"
 try:
     tokenizer = BertTokenizer.from_pretrained(model_dir)
     model = BertForSequenceClassification.from_pretrained(model_dir).to(device)
