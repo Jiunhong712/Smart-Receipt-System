@@ -2,7 +2,6 @@ import torch
 from transformers import BertTokenizer, BertForSequenceClassification
 import pickle
 import pandas as pd
-import numpy as np
 
 # Check for CUDA availability
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,7 +27,7 @@ except Exception as e:
     print(f"Error loading label encoder: {e}")
     exit()
 
-# Step 2: Load few-shot examples from CSV and check distribution
+# Step 2: Load few-shot examples (for reference only, not used in prediction)
 def load_few_shot_examples(csv_path, num_examples_per_category=3):
     try:
         df = pd.read_csv(csv_path, encoding='utf-8')
@@ -55,16 +54,10 @@ def load_few_shot_examples(csv_path, num_examples_per_category=3):
 csv_path = r"C:\Users\xavie\OneDrive\Documents\Y4S1\FYP\Data\LLM\Train\product_names (Jaya Grocer).csv"
 few_shot_examples = load_few_shot_examples(csv_path, num_examples_per_category=3)
 
-# Step 3: Prediction function with debugging
-def predict_with_few_shot(test_product, examples=few_shot_examples, max_len=128):
-    prompt = "Classify the following product into a category based on these examples:\n"
-    for ex in examples:
-        prompt += f"- {ex['product']} → {ex['category']}\n"
-    prompt += f"Now classify: {test_product}"
-    print(f"\nFull prompt:\n{prompt}")
-
+# Step 3: Prediction function (no few-shot prompting)
+def predict_product_category(test_product, max_len=128):
     encoding = tokenizer.encode_plus(
-        prompt,
+        test_product,
         add_special_tokens=True,
         max_length=max_len,
         return_token_type_ids=False,
@@ -80,27 +73,28 @@ def predict_with_few_shot(test_product, examples=few_shot_examples, max_len=128)
     with torch.no_grad():
         outputs = model(input_ids, attention_mask=attention_mask)
         logits = outputs.logits
-        softmax_probs = torch.softmax(logits, dim=1).cpu().numpy()[0]  # Probabilities
+        softmax_probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
         predicted_label = torch.argmax(logits, dim=1).item()
 
-    # Debugging: Print logits and probabilities
+    # Debugging output
+    print(f"\nProduct: {test_product}")
+    print(f"Tokens: {tokenizer.tokenize(test_product)}")
     print(f"Raw logits: {logits.cpu().numpy()[0]}")
     print(f"Softmax probabilities: {softmax_probs}")
     print(f"Predicted label index: {predicted_label}")
-
-    predicted_category = label_encoder.inverse_transform([predicted_label])[0]
-    print(f"Class probabilities (label: probability):")
+    print("Class probabilities (label: probability):")
     for idx, prob in enumerate(softmax_probs):
         category = label_encoder.inverse_transform([idx])[0]
         print(f"{category}: {prob:.4f}")
 
+    predicted_category = label_encoder.inverse_transform([predicted_label])[0]
     return predicted_category
 
-# Step 4: Interactive testing with debugging
+# Step 4: Interactive testing
 print("\nEnter a product name to classify (or 'quit' to stop):")
 while True:
     user_input = input("> ")
     if user_input.lower() == 'quit':
         break
-    predicted_category = predict_with_few_shot(user_input)
+    predicted_category = predict_product_category(user_input)
     print(f"Predicted Category: '{predicted_category}'")
