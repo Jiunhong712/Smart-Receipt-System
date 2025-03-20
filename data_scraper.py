@@ -3,25 +3,17 @@ from bs4 import BeautifulSoup
 import csv
 import os
 
-# Base URL for the fresh market collection
 base_url = 'https://klec.jayagrocer.com/collections/alcohol'
-
-# Define the range of pages to scrape (e.g., 2 to 14)
 start_page = 1
 end_page = 14
 
-# Loop through each page
 for page in range(start_page, end_page + 1):
-    # Construct the URL for the current page
     url = f'{base_url}?page={page}' if page > 1 else base_url
     print(f'Scraping page {page}: {url}')
 
-    # Send a GET request to the URL
     response = requests.get(url)
 
-    # Check if the request was successful
     if response.status_code == 200:
-        # Parse the HTML content
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # Find all product name elements
@@ -37,7 +29,7 @@ for page in range(start_page, end_page + 1):
                 print(name)
         else:
             print(f'No products found on page {page}. This might be the last page.')
-            break  # Stop if no products are found (assumes we've hit the end)
+            break
 
         # Load existing product names from CSV to avoid duplicates
         existing_names = set()
@@ -46,15 +38,14 @@ for page in range(start_page, end_page + 1):
             try:
                 with open(csv_file, 'r', encoding='utf-8') as csvfile:
                     reader = csv.reader(csvfile)
-                    next(reader, None)  # Skip header
+                    next(reader, None)
                     for row in reader:
-                        if row:  # Check if row is not empty
+                        if row:
                             existing_names.add(row[0])
             except UnicodeDecodeError:
-                # Fallback to 'latin1' if UTF-8 fails
                 with open(csv_file, 'r', encoding='latin1') as csvfile:
                     reader = csv.reader(csvfile)
-                    next(reader, None)  # Skip header
+                    next(reader, None)
                     for row in reader:
                         if row:
                             existing_names.add(row[0])
@@ -64,19 +55,18 @@ for page in range(start_page, end_page + 1):
         new_count = 0
         with open(csv_file, 'a', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
-            # Write header if file is new
             if not os.path.exists(csv_file) or os.stat(csv_file).st_size == 0:
                 writer.writerow(['Product Name'])
             # Add only new product names
             for name in product_names:
                 if name not in existing_names:
                     writer.writerow([name])
-                    existing_names.add(name)  # Update set to include new name
+                    existing_names.add(name)
                     new_count += 1
 
         print(f'Added {new_count} new product names from page {page}. Total unique names: {len(existing_names)}')
     else:
         print(f'Failed to retrieve page {page}. Status code: {response.status_code}')
-        break  # Stop if a page fails to load
+        break
 
 print(f'Scraping complete. Check {csv_file} for all product names.')
