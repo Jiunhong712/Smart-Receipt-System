@@ -12,27 +12,15 @@ import pickle
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 if not torch.cuda.is_available():
-    print("WARNING: CUDA not available. Running on CPU.")
+    print("WARNING: CUDA not available.")
 else:
     print(f"CUDA version: {torch.version.cuda}")
     print(f"GPU: {torch.cuda.get_device_name(0)}")
 
 def load_and_oversample_data(df_train, target_size=500):
-    print("\nCategory distribution before oversampling:")
+    print("\nCategory distribution (no oversampling):")
     print(df_train['Category'].value_counts())
-    
-    oversampled_dfs = []
-    for category, group in df_train.groupby('Category'):
-        n_samples = min(target_size, len(group) * 2)
-        oversampled_group = group.sample(n=n_samples, replace=True, random_state=42)
-        oversampled_dfs.append(oversampled_group)
-    
-    balanced_df = pd.concat(oversampled_dfs).reset_index(drop=True)
-    print(f"\nBalanced dataset size: {len(balanced_df)}")
-    print("Category distribution after oversampling:")
-    print(balanced_df['Category'].value_counts())
-    
-    return balanced_df
+    return df_train
 
 class ProductDataset(Dataset):
     def __init__(self, texts, labels, tokenizer, max_len=128):
@@ -88,15 +76,48 @@ class CustomTrainer(Trainer):
         loss = loss_fct(logits, labels)
         return (loss, outputs) if return_outputs else loss
 
+def predict_product_category(model, tokenizer, label_encoder, product_name, max_len=128):
+    encoding = tokenizer.encode_plus(
+        product_name,
+        add_special_tokens=True,
+        max_length=max_len,
+        return_token_type_ids=False,
+        padding='max_length',
+        truncation=True,
+        return_attention_mask=True,
+        return_tensors='pt'
+    )
+    input_ids = encoding['input_ids'].to(device)
+    attention_mask = encoding['attention_mask'].to(device)
+    
+    model.eval()
+    with torch.no_grad():
+        outputs = model(input_ids, attention_mask=attention_mask)
+        logits = outputs.logits
+        pred_label_idx = logits.argmax(-1).item()
+        pred_label = label_encoder.inverse_transform([pred_label_idx])[0]
+        probs = torch.softmax(logits, dim=-1).cpu().numpy()[0]
+    
+    print(f"\nProduct: {product_name} | Predicted: {pred_label}")
+    print(f"Tokens: {tokenizer.tokenize(product_name)}")
+    print(f"Raw logits: {logits.cpu().numpy()[0]}")
+    print(f"Softmax probabilities: {probs}")
+    for i, label in enumerate(label_encoder.classes_):
+        print(f"{label}: {probs[i]:.4f}")
+    return pred_label, logits
+
 def train_bert_model(csv_path, output_dir='fine_tuned_bert', target_size=500):
-    # Load full data and split before oversampling
     df_full = pd.read_csv(csv_path, encoding='latin1').drop_duplicates(subset=['Product Name'])
     train_df, val_df = train_test_split(df_full, test_size=0.2, stratify=df_full['Category'], random_state=42)
-
-    # Oversample training data
+    
+    # Add external examples to improve generalization
+    external_df = pd.DataFrame({
+        'Product Name': ["Carlsberg Beer 330ml", "Farmfresh Yogurt 200g", "Nestle Milo 1L", "Colgate Toothpaste 100g"],
+        'Category': ["Alcohol", "Chilled and Frozen", "Beverages", "Beauty and Health"]
+    })
+    train_df = pd.concat([train_df, external_df], ignore_index=True)
     balanced_df = load_and_oversample_data(train_df, target_size)
 
-    # Encode labels
     label_encoder = LabelEncoder()
     labels = label_encoder.fit_transform(balanced_df['Category'])
     texts = balanced_df['Product Name'].tolist()
@@ -105,28 +126,30 @@ def train_bert_model(csv_path, output_dir='fine_tuned_bert', target_size=500):
 
     print("\nLabel encoder classes:", list(label_encoder.classes_))
 
-    # Class weights from original full data
     original_labels = label_encoder.transform(df_full['Category'])
     class_weights = compute_class_weight('balanced', classes=np.unique(labels), y=original_labels)
+    class_weights = np.clip(class_weights, 0.5, 5.0)
     class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
 
-    # Datasets
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     train_dataset = ProductDataset(texts, labels, tokenizer)
     val_dataset = ProductDataset(val_texts, val_labels, tokenizer)
 
     model = BertForSequenceClassification.from_pretrained(
         'bert-base-uncased',
-        num_labels=len(label_encoder.classes_)
+        num_labels=len(label_encoder.classes_),
+        hidden_dropout_prob=0.3,
+        attention_probs_dropout_prob=0.3
     ).to(device)
 
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=10,
-        per_device_train_batch_size=32,
-        per_device_eval_batch_size=32,
+        per_device_train_batch_size=16,
+        per_device_eval_batch_size=16,
         warmup_steps=500,
-        weight_decay=0.05,
+        weight_decay=0.1,
+        learning_rate=2e-5,
         logging_dir='./logs',
         logging_steps=50,
         evaluation_strategy="epoch",
@@ -190,6 +213,14 @@ def train_bert_model(csv_path, output_dir='fine_tuned_bert', target_size=500):
         for key, value in eval_results.items():
             f.write(f"{key}: {value:.4f}\n")
     print(f"Evaluation metrics saved to {output_dir}/evaluation_metrics.txt")
+
+    # Manual checking loop
+    print("\nEntering manual testing mode. Enter a product name to classify (or 'quit' to stop):")
+    while True:
+        product_name = input("> ")
+        if product_name.lower() == 'quit':
+            break
+        predict_product_category(model, tokenizer, label_encoder, product_name)
 
 if __name__ == "__main__":
     csv_path = r"C:\Users\xavie\OneDrive\Documents\Y4S1\FYP\Data\LLM\Train\product_names (Jaya Grocer).csv"
