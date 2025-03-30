@@ -144,7 +144,7 @@ def train_bert_model(csv_path, output_dir='fine_tuned_bert', target_size=500):
 
     training_args = TrainingArguments(
         output_dir=output_dir,
-        num_train_epochs=10,
+        num_train_epochs=50,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
         warmup_steps=500,
